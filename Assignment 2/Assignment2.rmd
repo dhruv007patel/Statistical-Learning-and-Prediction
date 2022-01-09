@@ -1,0 +1,211 @@
+---
+title: "STAT 652 - Assignment 2"
+author: "Dhruv Patel, 301471961"
+output: pdf_document
+date: "Question 1"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE)
+```
+
+```{r}
+# Helper Functions 
+get.MSPE = function(Y, Y.hat){
+  return(mean((Y - Y.hat)^2))
+}
+
+# Create k CV folds for a AQset of size n
+get.folds = function(n, K) {
+  ### Get the appropriate number of fold labels
+  n.fold = ceiling(n / K) # Number of observations per fold (rounded up)
+  fold.ids.raw = rep(1:K, times = n.fold) # Generate extra labels
+  fold.ids = fold.ids.raw[1:n] # Keep only the correct number of labels
+  # Shuffle the fold labels
+  folds.rand = fold.ids[sample.int(n)]
+  return(folds.rand)
+}
+```
+
+1. Fit a default Random Forest (RF) to only the three main variables in the data—Temp,    
+Wind, and Solar.R—and not the two extra ones that we engineered. A RF should be able to     
+detect interactions automatically if needed.    
+
+```{r}
+AQ = airquality[1:4]
+
+# Removing Null values
+AQ = na.omit(AQ)
+
+# importing libraries for Random Forest and setting setting seed
+library(randomForest) 
+set.seed(301471961)
+
+# Training the model 
+fit.rf.1 = randomForest(Ozone ~ ., data = AQ, importance = T)
+
+# Plotting the model 
+plot(fit.rf.1)
+
+# Predict the model on Training set
+OOB.pred.1 = predict(fit.rf.1)
+```
+
+1. (a) Report the OOB error.     
+Answer: OBB error is 299.7023.         
+```{r}
+# Get the Mean Square Prediction Error
+OOB.MSPE.1 = get.MSPE(AQ$Ozone, OOB.pred.1)
+OOB.MSPE.1
+```
+
+1.(b) Produce variable importance measures and comment on the relative importance of the variables. 
+How do they compare to what we have seen in earlier analyses of these data?             
+Answer: Based on the below importance measures Temp is the most important then Wind and at last Solar.R. Comparing to the analysis done before we are getting similar variables as important feature i.e (Temp > wind > Solar.R) 
+
+```{r}
+# Model Summary
+summary(fit.rf.1)
+
+# Get Important variable from the model 
+importance(fit.rf.1)
+
+# Plot Important variable
+varImpPlot(fit.rf.1)
+```
+
+2. (a) Report the OOB error. Does it improve much compared to the previous     
+RF analysis without the variables?           
+Answer: Yes, OOB error (MSPE) has been reduced from 299.7023 to 280.3793 after including new featured variables.        
+```{r}
+AQ = airquality
+
+# Removing Null values
+AQ = na.omit(AQ[1:4])
+AQ$TWcp = AQ$Temp*AQ$Wind
+AQ$TWrat = AQ$Temp/AQ$Wind
+
+# importing libraries for Random Forest and setting setting seed
+library(randomForest) 
+set.seed(301471961)
+
+# Training the model 
+fit.rf.1 = randomForest(Ozone ~ ., data = AQ, importance = T)
+
+# Plotting the model 
+plot(fit.rf.1)
+
+# Predict the model on Training set
+OOB.pred.1 = predict(fit.rf.1)
+
+# Get the Mean Square Prediction Error
+OOB.MSPE.1 = get.MSPE(AQ$Ozone, OOB.pred.1)
+OOB.MSPE.1
+
+```
+
+2. (b) Produce variable importance measures. Are the two engineered features particularly important?      
+Answer: As per the output for variable importance measures. TWrat is significantly more important than TWcp. Also, adding them also reduce overall MSPE. So those features are important.
+```{r}
+# Get Important variable from the train model 
+importance(fit.rf.1)
+
+# Plot Important variable
+varImpPlot(fit.rf.1)
+```
+3. (a) Report the mean root-MSPE for each combination of shrink and depth?
+Answer: Mean of alll 
+```{r warning = FALSE, message = FALSE}
+library(gbm)
+  
+set.seed(301471961)
+AQ = airquality
+
+# Removing Null values
+AQ = na.omit(AQ[1:4])
+
+### Set parameter values
+# shrink = 0.001, 0.005, 0.025, 0.125
+# depth = 2, 4, 6
+# tree = 200
+
+V=5
+R=2 
+n2 = nrow(AQ)
+# Create the folds and save in a matrix
+folds = matrix(NA, nrow=n2, ncol=R)
+for(r in 1:R){
+        folds[,r]=floor((sample.int(n2)-1)*V/n2) + 1
+}
+
+trees = 5000
+shrink = c(0.001,0.005,0.025,0.125)
+depth = c(2,4,6)
+
+NS = length(shrink)
+ND = length(depth)
+
+gb.cv = matrix(NA, nrow=ND*NS, ncol=V*R)
+opt.tree = matrix(NA, nrow=ND*NS, ncol=V*R)
+
+qq = 1
+for(r in 1:R){
+  for(v in 1:V){
+    AQ.train = AQ[folds[,r]!=v,]
+    AQ.test = AQ[folds[,r]==v,]
+    counter=1
+    for(d in depth){
+      for(s in shrink){
+        
+        AQ.gbm <- gbm(data=AQ.train, Ozone~., distribution="gaussian",n.trees=trees, 
+                      interaction.depth=d, shrinkage=s,bag.fraction=0.8)
+        treenum = min(trees, 2*gbm.perf(AQ.gbm, method="OOB", plot.it=FALSE))
+        opt.tree[counter,qq] = treenum
+        preds = predict(AQ.gbm, newdata=AQ.test, n.trees=treenum)
+        gb.cv[counter,qq] = mean((preds - AQ.test$Ozone)^2)
+        counter=counter+1
+      }
+    }
+    qq = qq+1
+  }  
+}
+
+parms = expand.grid(shrink,depth)
+row.names(gb.cv) = paste(parms[,2], parms[,1], sep="|")
+row.names(opt.tree) = paste(parms[,2], parms[,1], sep="|")
+
+
+(mean.tree = apply(opt.tree, 1, mean))
+(mean.cv = sqrt(apply(gb.cv, 1, mean)))
+
+mean(mean.cv)
+
+boxplot(sqrt(gb.cv), use.cols=FALSE, las=2)
+
+```
+
+
+3. (b) Show relative root-MSPE boxplots for each combination of shrink and depth?
+```{r}
+# Get relative MSPEs and make boxplot
+min.cv = apply(gb.cv, 2, min)
+boxplot(sqrt(t(gb.cv)/min.cv), use.cols=TRUE, las=2, 
+        main="GBM Fine-Tuning Variables and Node Sizes")
+min.cv
+```
+
+3. (c) What combination of shrink and depth do you prefer? 
+Answer: Based on the relative MSPE plot, shrinkage = 0.025 and depth = 4 looks like the best fitted model. And relatively, Temp is the most important among Wind and Solar.R.   
+```{r}
+set.seed(301471961)
+
+fit.gbm.best = gbm(Ozone ~ ., data = AQ, distribution = "gaussian", n.trees = 125, interaction.depth = 2, shrinkage = 0.001,bag.fraction = 0.8)
+
+n.trees.best = gbm.perf(fit.gbm.best, plot.it = F) * 2
+
+pred.gbm.best = predict(fit.gbm.best, AQ.test, n.trees.best)
+MSPE.gbm = get.MSPE(AQ.test$Ozone, pred.gbm.best)
+MSPE.gbm
+
+summary(fit.gbm.best)
+```

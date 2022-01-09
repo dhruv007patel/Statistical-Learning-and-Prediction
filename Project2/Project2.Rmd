@@ -1,0 +1,417 @@
+---
+title: "Project 2"
+author: "Dhruv Patel"
+date: "16/10/2021"
+output: pdf_document
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+# Clean the env. variables and plots 
+rm(list = ls())
+```
+
+```{r}
+library(MASS)
+library(glmnet)
+library(pls)
+library(mgcv)
+library(rpart)
+library(caret)
+library(olsrr)
+library(boot)
+library(dplyr)       
+library(e1071)       
+library(ipred)     
+library(performance)
+library(h2o)
+
+rsq <- function(formula, data, indices) {
+  d <- data[indices,] # allows boot to select sample
+  fit <- lm(formula, data=d)
+  return(summary(fit)$r.square)
+}
+
+install.packages("trackdown")
+
+# Helper Functions
+get.MSPE = function(Y, Y.hat) {
+  residuals = Y - Y.hat
+  resid.sq = residuals ^ 2
+  SSPE = sum(resid.sq)
+  MSPE = SSPE / length(Y)
+  return(MSPE)
+}
+```
+
+```{r}
+data = read.csv('/Users/dhruv/Desktop/Docs/STAT_652/Project2/Data2021_final.csv',header=TRUE)
+summary(data)
+
+# Randomly selecting 10 rows as test data from training data.
+set.seed(301471961)
+ind = sample(nrow(data), 10, replace = TRUE)
+model_test_data = data[ind, ]
+data = data[-ind, ]
+
+test_data = read.csv('/Users/dhruv/Desktop/Docs/STAT_652/Project2/Data2021test_final_noY.csv',header=TRUE)
+summary(test_data)
+```
+
+```{r}
+# Finding if any column has null values
+sapply(data, function(x) sum(is.na(x)))
+```
+
+```{r}
+# Linear Regression Model
+lm_model = lm(Y~.,data)
+
+# For the summary we can find the X1 is the most important variable. 
+summary(lm_model)
+
+### Trying different variable selection methods to choose the important variables 
+
+# 1. Forward Selection 
+# Using P value
+fwd_sel_model_p = ols_step_forward_p(lm_model,penter = 0.05)
+
+# Selection Summary: X1 most important 
+fwd_sel_model_p
+
+# 2. Forward Regression
+# Using AIC: 
+fwd_sel_model_aic = ols_step_forward_aic(lm_model)
+
+# Selection Summary: X1, X11, X9, X6, X2 are important variables 
+fwd_sel_model_aic
+
+# Plotting how much each variable contributes: We can see relative contribution amongst the selected variables. 
+plot(fwd_sel_model_aic)
+
+# 3. #Backward Elimination Method 
+# Using p value
+back_sel_model_p = ols_step_backward_p(lm_model, prem = 0.05)
+
+# Elimination Summary: ["X3"  "X5"  "X8"  "X12" "X4"  "X10" "X14" "X7"  "X13" "X15" "X2"  "X6"  "X9"  "X11"] can be removed.  
+back_sel_model_p
+
+# Backward Elimination Method 
+# Using AIC value
+back_sel_model_aic = ols_step_backward_aic(lm_model)
+
+# Elimination Summary: ["X3"  "X5"  "X8"  "X12" "X4"  "X10" "X14" "X7"  "X13" "X15"] can be removed.
+back_sel_model_aic
+
+# Step-wise using P value
+stepwise_model_p = ols_step_both_p(lm_model,prem = 0.05, pent = 0.05)
+
+# Step-wise
+# Selection Summary: Only variable X1 was added
+stepwise_model_p
+
+# Step-wise selection using AIC 
+stepwise_model_aic = ols_step_both_aic(lm_model)
+
+# Step-wise Summary: ["X1"  "X11"  "X9"  "X6"  "X2"] were added to get best AIC value
+stepwise_model_aic
+```
+```{r}
+set.seed(301471961)
+
+# Fitting best model using K-fold CV method
+n = nrow(data)
+K = 10
+all.models = c("LS", "Step", "Ridge", "LAS-Min", "LAS-1se", "PLS", "GAM","Full-Tree", "Min-Tree", "1SE-Tree")
+CV.MSPEs = array(0, dim = c(length(all.models), K))
+rownames(CV.MSPEs) = all.models
+colnames(CV.MSPEs) = 1:K
+
+lambda.vals = seq(from = 0, to = 100, by = 0.05)
+
+n = nrow(data)
+
+for(i in 1:K){
+  
+  # Random Index
+  new.order = sample.int(n) 
+  ind.train = which(new.order <= n * 0.75) 
+  ind.valid = which(new.order > n * 0.75) 
+  
+  # Splitting the Data-set 
+  data.train = data[ind.train, ] 
+  data.valid = data[ind.valid, ]
+  
+  Y.train = data.train$Y
+  Y.valid = data.valid$Y
+  
+  mat.train.int = model.matrix(Y ~ ., data = data.train)
+  mat.train = mat.train.int[,-1]
+  mat.valid.int = model.matrix(Y ~ ., data = data.valid)
+  mat.valid = mat.valid.int[,-1]
+  
+  ##########
+  ### LS ###
+  ##########
+  fit.ls = lm(Y ~ ., data = data.train)
+  pred.ls = predict(fit.ls, data.valid)
+  MSPE.ls = get.MSPE(Y.valid, pred.ls)
+  CV.MSPEs["LS", i] = MSPE.ls
+  
+  ############
+  ### Step ###
+  ############
+  fit.start = lm(Y ~ 1, data = data.train)
+  fit.step = step(fit.start, list(upper = fit.ls), trace = 0)
+  pred.step = predict(fit.step, data.valid)
+  MSPE.step = get.MSPE(Y.valid, pred.step)
+  CV.MSPEs["Step", i] = MSPE.step
+  
+  #############
+  ### Ridge ###
+  ############# 
+  
+  ### Fit ridge regression
+  ### We already definite lambda.vals. No need to re-invent the wheel
+  fit.ridge = lm.ridge(Y ~ ., lambda = lambda.vals, data = data.train)
+  
+  ### Get optimal lambda value
+  ind.min.GCV = which.min(fit.ridge$GCV)
+  lambda.min = lambda.vals[ind.min.GCV]
+  
+  ### Get coefficients for optimal model
+  all.coefs.ridge = coef(fit.ridge)
+  coef.min.ridge = all.coefs.ridge[ind.min.GCV,]
+
+  ### Get predictions and MSPE on validation set
+  pred.ridge = mat.valid.int %*% coef.min.ridge
+  pred.ridge = as.numeric(pred.ridge)
+  MSPE.ridge = get.MSPE(Y.valid, pred.ridge)
+  CV.MSPEs["Ridge", i] = MSPE.ridge
+  
+  
+  #############
+  ### LASSO ###
+  #############
+  
+  ### Fit model
+  fit.LASSO = cv.glmnet(mat.train, Y.train)
+
+  ### Get optimal lambda values
+  lambda.min = fit.LASSO$lambda.min
+  lambda.1se = fit.LASSO$lambda.1se
+  
+  ### Get predictions 
+  pred.min_lasso = predict(fit.LASSO, mat.valid, lambda.min)
+  pred.1se = predict(fit.LASSO, mat.valid, lambda.1se)
+
+  ### Get and store MSPEs
+  MSPE.min = get.MSPE(Y.valid, pred.min_lasso)
+  MSPE.1se = get.MSPE(Y.valid, pred.1se)
+  CV.MSPEs["LAS-Min", i] = MSPE.min
+  CV.MSPEs["LAS-1se", i] = MSPE.1se
+  
+  #############################
+  ### Partial Least Squares ###
+  #############################
+
+  ### Fit PLS
+  fit.pls = plsr(Y ~ ., data = data.train, validation = "CV", segments = 10)
+  
+
+  ### Get optimal number of folds
+  CV.pls = fit.pls$validation
+  PRESS.pls = CV.pls$PRESS
+  n.comps = which.min(PRESS.pls)
+
+  ### Get predictions and MSPE
+  pred.pls = predict(fit.pls, data.valid, ncomp = n.comps)
+  MSPE.pls = get.MSPE(Y.valid, pred.pls)
+  CV.MSPEs["PLS", i] = MSPE.pls
+  
+  ###########
+  ### GAM ###
+  ###########
+
+  ### Fit model
+  fit.gam = gam(Y ~ s(X1) + s(X11) + s(X9) + s(X6) + s(X2) + s(X10) + s(X15), data = data.train)
+
+  ### Get predictions and MSPE
+  pred.gam = predict(fit.gam, data.valid)
+  MSPE.gam = get.MSPE(Y.valid, pred.gam)
+  CV.MSPEs["GAM", i] = MSPE.gam
+  
+  #################
+  ### Full Tree ###
+  #################
+  
+  fit.tree = rpart(Y ~ ., data = data.train, cp = 0)
+  
+  ### Get the CP table
+  info.tree = fit.tree$cptable
+
+  ### Get predictions
+  pred.full = predict(fit.tree, data.valid) 
+  MSPE.full = get.MSPE(Y.valid, pred.full) 
+  CV.MSPEs["Full-Tree", i] = MSPE.full
+  
+  ################### 
+  ### Min CV Tree ### 
+  ###################
+
+  ### Get minimum CV error and corresponding CP value
+  ind.best = which.min(info.tree[, "xerror"]) 
+  CV.best = info.tree[ind.best, "xerror"] 
+  CP.best = info.tree[ind.best, "CP"]
+
+  ### Get the geometric mean of best CP with one above it
+  if (ind.best == 1) {
+    CP.GM = CP.best
+  } 
+  else{
+    CP.above = info.tree[ind.best - 1, "CP"]
+    CP.GM = sqrt(CP.best * CP.above) 
+  }
+  
+  ### Fit minimum CV error tree
+  fit.tree.min = prune(fit.tree, cp = CP.best)
+
+  ### Get predictions and MSPE
+  pred.min = predict(fit.tree.min, data.valid) 
+  MSPE.min = get.MSPE(Y.valid, pred.min) 
+  CV.MSPEs["Min-Tree", i] = MSPE.min
+  
+  ######################## 
+  ### 1SE Rule CV Tree ### 
+  ########################
+
+  ### Get 1se rule CP value
+  err.min = info.tree[ind.best, "xerror"]
+  se.min = info.tree[ind.best, "xstd"]
+  
+  threshold = err.min + se.min
+  ind.1se = min(which(info.tree[1:ind.best, "xerror"] < threshold))
+  
+  ### Take geometric mean with superior row
+  CP.1se.raw = info.tree[ind.1se, "CP"]
+  
+  if (ind.1se == 1) {
+    ### If best CP is in row 1, store this value
+    CP.1se = CP.1se.raw
+  } 
+  else{
+    ### If best CP is not in row 1, average this with the value from the ### row above it.
+    ### Value from row above
+    CP.above = info.tree[ind.1se - 1, "CP"]
+    
+    ### (Geometric) average
+    CP.1se = sqrt(CP.1se.raw * CP.above)
+  }
+  
+  ### Prune the tree
+  fit.tree.1se = prune(fit.tree, cp = CP.1se)
+    
+  ### Get predictions and MSPE
+  pred.1se = predict(fit.tree.1se, data.valid)
+  MSPE.1se = get.MSPE(Y.valid, pred.1se)
+  CV.MSPEs["1SE-Tree", i] = MSPE.1se
+}
+```
+
+```{r}
+CV.MSPEs
+# Average MSPE
+rowMeans(CV.MSPEs)
+
+### Make boxplot
+boxplot(CV.MSPEs, las = 2, main = "MSPE Boxplot")
+
+### Get relative MSPEs and make boxplot
+CV.RMSPEs = apply(CV.MSPEs, 1, function(W) W/min(W))
+CV.RMSPEs = t(CV.RMSPEs)
+boxplot(CV.RMSPEs, las = 2, main = "RMSPE Boxplot")
+```
+
+
+
+
+```{r}
+# Code for best model
+
+# Initializing environment
+h2o.init(nthreads = -1)
+
+y = "Y"
+x = setdiff(names(data), y)
+
+train.h2o = as.h2o(data)
+
+h2o.fit1 <- h2o.gbm(
+  x = x,
+  y = y,
+  training_frame = train.h2o,
+  nfolds = 5,
+  ntrees = 5000,
+  stopping_rounds = 10,
+  stopping_tolerance = 0,
+  seed = 301471961
+)
+
+h2o.fit1@parameters$ntrees # 41
+
+h2o.rmse(h2o.fit1, xval = TRUE) # 1.278083
+
+split = h2o.splitFrame(train.h2o, ratios = 0.75)
+train = split[[1]]
+valid = split[[2]]
+
+h2o.final <- h2o.gbm(
+  x = x,
+  y = y,
+  training_frame = train.h2o,
+  nfolds = 5,
+  ntrees = 5000,
+  learn_rate = 0.01,
+  learn_rate_annealing = 1,
+  max_depth = 1,
+  min_rows = 1,
+  sample_rate = 0.75,
+  col_sample_rate = 1,
+  stopping_rounds = 10,
+  stopping_tolerance = 0,
+  seed = 301471961
+)
+
+h2o.final@parameters$ntrees
+
+h2o.rmse(h2o.final, xval = TRUE)
+
+h2o.varimp_plot(h2o.final, num_of_features = 10)
+
+# Validating model
+test.h2o <- as.h2o(model_test_data)
+
+h2o.performance(model = h2o.final, newdata = test.h2o)
+
+h2o.predict(h2o.final, newdata = test.h2o)
+
+pred.h2o = predict(h2o.final, test.h2o)
+
+test_acc = get.MSPE(model_test_data$Y,pred.h2o) # 1.10928
+
+
+# Getting prediction for test_data 
+test.h2o <- as.h2o(test_data)
+
+h2o.performance(model = h2o.final, newdata = test.h2o)
+
+h2o.predict(h2o.final, newdata = test.h2o)
+
+predictions = predict(h2o.final, test.h2o)
+
+h2o.exportFile(predictions, path = "test.csv")
+
+```
+

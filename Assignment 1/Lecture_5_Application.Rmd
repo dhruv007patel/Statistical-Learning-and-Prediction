@@ -1,0 +1,106 @@
+---
+title: "STAT 652 Assignment 1"
+author: "Dhruv Patel"
+date: "13/10/2021"
+output: pdf_document
+---
+
+```{r setup, include=FALSE} 
+knitr::opts_chunk$set(warning = FALSE, message = FALSE) 
+```
+
+Lecture 5 Application         
+We will now do variable selection with these five variables     
+1. Use all-subsets regression.      
+```{r} 
+rm(list=ls(all=TRUE))
+data = na.omit(airquality[,1:4])
+
+data$TWcp = data$Temp*data$Wind
+data$TWrat = data$Temp/data$Wind
+
+filter_data = model.matrix(Ozone ~.,data= data)
+head(filter_data)
+
+library(leaps)
+allsub <- regsubsets(x=filter_data, 
+                     y=data$Ozone, intercept = F)
+
+info.subsets = summary(allsub)
+seq.subsets = info.subsets$which
+vars.seq.subsets.raw = apply(seq.subsets, 1, function(W){
+  vars.list = names(W)[W]
+  output = paste0(vars.list, collapse = ", ")})
+```
+(a) Report the variables in the best model of each size.      
+```{r}
+print(vars.seq.subsets.raw)
+```
+
+
+(b) Compute BIC on each of these models and report the BIC values for the
+models.          
+Answer:       
+```{r}
+print(info.subsets$bic)
+```
+
+(c) Identify the best model. What variables are in it?           
+Answer: The best model is (Intercept),Solar.R,Temp,TWrat since its has minimum BIC value i.e. -207.1195            
+```{r}
+print(min(info.subsets$bic))
+```
+
+2. Use the hybrid stepwise algorithm that is the default in the step() function. Report
+the model that it chooses as “best.”     
+Answer: The best model according to stepwise algorithm is TWrat + Temp + Solar.R.          
+```{r}
+data$TWcp = data$Temp*data$Wind
+data$TWrat = data$Temp/data$Wind
+head(data)
+rows = nrow(data)
+
+initial <- lm(data=data, formula=Ozone~ 1)
+final <- lm(data=data, formula=Ozone~Solar.R+Wind+Temp+TWcp+TWrat)
+step <- step(object=initial, scope=list(upper=final), k = log(rows))
+summary(step)
+```
+
+3. Use 10-fold CV to estimate the MSPE for the stepwise model selection process. That
+is,       
+(a) Set the seed to 2928893 before running the sample.int() function.       
+(b) Create 10 folds     
+(c) Run step() on each training set      
+(d) Find the best model, and compute the prediction error on it       
+(e) Report the separate MSPEs from each fold, MSP Ev, v = 1, . . . , 10 and
+the MSPE for the full data.     
+Answers:       
+```{r}
+set.seed(2928893)
+rows = nrow(data)
+V=10
+folds = floor((sample.int(rows)-1)*V/rows) + 1 
+mat_CV_L5 = matrix(NA, nrow=V, ncol=1)
+
+for(v in 1:V){
+  
+  initial <- lm(data=data[folds != v,], formula=Ozone~ 1)
+  final <- lm(data=data[folds != v,], formula=Ozone~Solar.R+Wind+Temp+TWcp+TWrat)
+  rows = nrow(data[folds != v,])
+  step <- step(object=initial, scope=list(upper=final), k = log(rows))
+  
+  pred = predict(step,newdata=data[folds==v,])
+  summary(pred)
+  mat_CV_L5[v,1] = mean((data[folds==v,"Ozone"] - pred)^2)
+}
+
+lm_best = lm(Ozone ~ TWrat + Temp + Solar.R, data = data)
+summary(lm_best)
+plot(lm_best)
+
+colnames(mat_CV_L5) = c('Each fold MPSE')
+mat_CV_L5
+mean(mat_CV_L5) 
+```
+
+

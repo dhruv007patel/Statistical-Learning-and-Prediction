@@ -1,0 +1,185 @@
+---
+title: "STAT 652 Assignment 1"
+author: "Dhruv Patel"
+date: "13/10/2021"
+output: pdf_document
+---
+```{r setup, include=FALSE} 
+knitr::opts_chunk$set(warning = FALSE, message = FALSE) 
+```
+
+Lecture 4: Applications A       
+1. Compute a summary on TWcp and TWrat. Report the minimum, maximum, and
+mean for each variable.    
+Answer:
+```{r}
+data <-  read.csv("/Users/dhruv/Downloads/midterm.csv",header=TRUE, sep=",", na.strings=" ")
+
+data = na.omit(data)
+filter_data = (data[,1:4])
+head(filter_data)
+
+filter_data$TWcp = filter_data$Temp*filter_data$Wind
+filter_data$TWrat = filter_data$Temp/filter_data$Wind
+```
+
+Min, Max and Mean values for TWcp are:      
+```{r}
+min(filter_data$TWcp)
+max(filter_data$TWcp)
+mean(filter_data$TWcp)
+```
+
+Min, Max and Mean values for TWrat are:
+```{r}
+min(filter_data$TWrat)
+max(filter_data$TWrat)
+mean(filter_data$TWrat)
+```
+
+2. Create two new models: Temp + Wind + TWcp and Temp + Wind + TWrat. Fit these
+two models in lm().      
+
+
+(a) Report the t-test results for the two new variables.      
+Answer:      
+TWrat summary:      
+```{r}
+lm_twrat = lm(Ozone ~ Temp + Wind + TWrat, data = filter_data)
+summary(lm_twrat)
+```
+
+TWcp summary:     
+```{r}
+lm_twcp = lm(Ozone ~ Temp + Wind + TWcp, data = filter_data)
+summary(lm_twcp)
+```
+
+(b) Based on the test results, which variable seems to be the most useful, or are
+neither particularly helpful? (1 sentence)      
+Answer:     
+t values for TWcp and TWrat are -3.987 and 4.005 respectively.Since both values are below significance level(0.5). Both are important.      
+
+(c) From the model with the cross-product term, compute and report the slope
+of the Temp effect when Wind is at its minimum value. Repeat for the
+maximum value of Wind. (You can do this by hand from the output if you
+want.)
+```{r}
+min(filter_data$Wind)
+max(filter_data$Wind)
+```
+                  
+                                    
+                                                      
+                                                                                          
+                  
+                  
+                                    
+                                                      
+                                                                                          
+                  
+                                    
+                                    
+                                                      
+                                                                                          
+                  
+                                    
+                                    
+                                                      
+                                                                                          
+                  
+3. Fit each model on the training data and report the MSPEs from the validation
+data.      
+(a) Which model wins this competition?     
+Answer:       
+```{r}
+set.seed(2928893)
+rows = nrow(filter_data)
+train_split = 0.75
+reorder_col = sample.int(n=rows, size=rows, replace=FALSE)
+set = ifelse(test = ((train_split*rows) > reorder_col), yes=1, no=2)
+
+train_data = filter_data[set==1,]
+test_data = filter_data[set==2,]
+
+fit.TWcp = lm(Ozone ~ Temp + Wind + TWcp, data = train_data)
+fit.TWrat = lm(Ozone ~ Temp + Wind + TWrat, data = train_data)
+
+pred.TWcp = predict(fit.TWcp, newdata=test_data)
+pred.TWrat = predict(fit.TWrat,newdata=test_data)
+
+MSPE.TWcp = mean((test_data$Ozone - pred.TWcp)^2)
+MSPE.TWrat = mean((test_data$Ozone - pred.TWrat)^2)
+
+MSPE.TWcp
+MSPE.TWrat
+```
+So,when set.seed(2928893) is fixed. We get MSPE for TWcp as 286.4392 and TWrat as 290.9852. Which shows TWcp wins the competition.       
+
+
+4. Add these models the five you compared in the previous exercise, and rerun the CV
+20 times.         
+(a) Make boxplots of the RMSPE, and narrow focus if necessary to see
+best models better.         
+Answer: V = 7 corresponding to different models and R = 20 number of times it runs.        
+```{r}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE) 
+
+data$TWcp = data$Temp * data$Wind
+data$TWrat = data$Temp / data$Wind
+
+V=7 
+R=20 
+
+mat_CV = matrix(NA, nrow=V*R, ncol=7)
+colnames(mat_CV) = c("Solar.R", "Wind", "Temp","TWcp","TWrat","All","Custom")
+
+for (i in 1:R){ 
+  folds = floor((sample.int(rows)-1)*V/rows) + 1 
+  for(j in 1:V){
+    
+    # Training Model
+    fit.Solar.R = lm(Ozone ~ Solar.R, data = data[folds!=j,])
+    fit.Wind = lm(Ozone ~ Wind, data = data[folds!=j,])
+    fit.Temp = lm(Ozone ~Temp, data = data[folds!=j,])
+    fit.TWcp = lm(Ozone ~ Temp + Wind + TWcp, data = data[folds!=j,])
+    fit.TWrat = lm(Ozone ~ Temp + Wind + TWrat, data = data[folds!=j,])
+    fit.All = lm(Ozone ~ ., data = data[folds!=j,])
+    fit.Custom = lm(Ozone ~ .^2 + Solar.R^2 + Wind^2 + Temp^2, data = data[folds!=j,])
+    
+    # Model Prediction
+    pred.Solar.R = predict(fit.Solar.R, newdata = data[folds==j,])
+    pred.Wind = predict(fit.Wind, newdata = data[folds==j,])
+    pred.Temp = predict(fit.Temp, newdata = data[folds==j,])
+    pred.TWcp = predict(fit.TWcp, newdata = data[folds==j,])
+    pred.TWrat = predict(fit.TWrat,newdata = data[folds==j,])
+    pred.All = predict(fit.All, newdata = data[folds==j,])
+    pred.Custom = predict(fit.Custom,newdata = data[folds==j,])
+    
+    r = j+V*(i-1)
+    # Calculating MSPE for each attributes
+    mat_CV[r,1] = mean((data[folds==j,"Ozone"] - pred.Solar.R)^2)
+    mat_CV[r,2] = mean((data[folds==j,"Ozone"] - pred.Wind)^2)
+    mat_CV[r,3] = mean((data[folds==j,"Ozone"] - pred.Temp)^2)
+    mat_CV[r,4] = mean((data[folds==j,"Ozone"] - pred.TWcp)^2)
+    mat_CV[r,5] = mean((data[folds==j,"Ozone"] - pred.TWrat)^2)
+    mat_CV[r,6] = mean((data[folds==j,"Ozone"] - pred.All)^2)
+    mat_CV[r,7] = mean((data[folds==j,"Ozone"] - pred.Custom)^2)
+  }
+}
+```
+
+MSPE Cross-Validation Boxplot:       
+```{r}
+# MSPE Boxplot
+boxplot(mat_CV, las=2, ylim=c(0,1300),main="MSPE Cross-Validation")
+```
+
+
+Relative MSPE Cross-Validation Boxplot:        
+```{r}
+rel_CV = mat_CV/apply(mat_CV, 1, min)
+boxplot(rel_CV, las=2,ylim=c(0,10),main="Relative MSPE Cross-Validation")
+```
+(b) Are any of the new models competitive, or even best? (1 sentence)        
+Answer: The model with second-order for three varialbes (Solar.R, Wind and Temp) is best model till now.     

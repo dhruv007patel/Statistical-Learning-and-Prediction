@@ -1,0 +1,40 @@
+---
+title: "STAT 652 Assignment 1"
+author: "Dhruv Patel"
+date: "13/10/2021"
+output: pdf_document
+---
+```{r setup, include=FALSE} 
+knitr::opts_chunk$set(warning = FALSE, message = FALSE) 
+```
+
+Lecture 4 Application B       
+1. Once zone and make have been converted to factors, run the linear regression with per
+as the response and the other six variables as explanatory.      
+(a) Create a summary of the lm object.     
+i. Although you fit a model with 6 variables, how many parameters are
+estimated?    
+Answer:     
+```{r}
+ins = read.csv('/Users/dhruv/Downloads/Insurance-1.csv',header=TRUE)
+ins$zone = as.factor(ins$zone)
+ins$make=as.factor(ins$make)
+
+ins = ins[ins$claims>0,]
+dim(ins)
+
+ins_per_lm = lm(per ~ ., data = ins)
+summary(ins_per_lm)
+```
+
+```{r}
+length(ins_per_lm$coefficients)
+```
+ii. What is the intercept of the regression when make and zone are both
+at their first level, 1?     
+Answer: To find intercept for first level everything else will be zero. So finally we will get intercept = 11.86
+
+
+iii. What is the intercept of the regression when make and zone are both
+at their last levels, 9 and 7, respectively?      
+Answer: To find intercept at make9 and zone7 will be (make7) =  (Intercept) + (Intercept at make9) + (Intercept at zone 7) = 11.86 - 2.862 - 1.716 = 7.282     
